@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Parser</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
+        .upload-area:hover { border-color: #007bff; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 5px; }
+        pre { background: #e9ecef; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .error { color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Resume Parser</h1>
+    <p>Upload a PDF or DOCX resume to convert it to JSON format.</p>
+    
+    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+        <input type="file" id="fileInput" accept=".pdf,.docx" style="display: none;">
+        <p>Click here to select a resume file (PDF or DOCX)</p>
+    </div>
+    
+    <button onclick="uploadFile()">Parse Resume</button>
+    <button onclick="generateQuestions()" id="generateBtn" style="display:none; margin-left:10px;">Generate Questions</button>
+    
+    <div id="result"></div>
+    <div id="questions"></div>
+
+    <script>
+        let resumeData = null;
+        
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file first');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            document.getElementById('result').innerHTML = '<p>Parsing resume...</p>';
+            
+            fetch('/parse', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('result').innerHTML = 
+                        `<div class="error">Error: ${data.error}</div>`;
+                } else {
+                    resumeData = data;
+                    document.getElementById('result').innerHTML = 
+                        `<div class="result">
+                            <h3>Parsed Resume Data:</h3>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>`;
+                    document.getElementById('generateBtn').style.display = 'inline-block';
+                }
+            })
+            .catch(error => {
+                document.getElementById('result').innerHTML = 
+                    `<div class="error">Error: ${error.message}</div>`;
+            });
+        }
+        
+        function generateQuestions() {
+            if (!resumeData) {
+                alert('Please parse a resume first');
+                return;
+            }
+            
+            document.getElementById('questions').innerHTML = '<p>Generating questions...</p>';
+            
+            fetch('/generate-questions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(resumeData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('questions').innerHTML = 
+                        `<div class="error">Error: ${data.error}</div>`;
+                } else {
+                    let questionsHtml = '<div class="result"><h3>Interview Questions:</h3><ol>';
+                    data.questions.forEach(q => {
+                        questionsHtml += `<li><strong>${q.type}:</strong> ${q.question}</li>`;
+                    });
+                    questionsHtml += '</ol></div>';
+                    document.getElementById('questions').innerHTML = questionsHtml;
+                }
+            })
+            .catch(error => {
+                document.getElementById('questions').innerHTML = 
+                    `<div class="error">Error: ${error.message}</div>`;
+            });
+        }
+        
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const fileName = e.target.files[0]?.name || 'No file selected';
+            document.querySelector('.upload-area p').textContent = fileName;
+        });
+    </script>
+</body>
+</html>
