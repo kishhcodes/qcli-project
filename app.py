@@ -137,10 +137,6 @@ Return only valid JSON:"""
 class ATSAnalyzer:
     def __init__(self):
         self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
-
-class AnswerAnalyzer:
-    def __init__(self):
-        self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
     
     def analyze_ats_score(self, resume_data):
         prompt = f"""Analyze this resume for ATS compatibility and suggest specific job roles. Return JSON format:
@@ -191,6 +187,10 @@ Return only valid JSON:"""
             "keyword_density": 60,
             "format_score": 80
         }
+
+class AnswerAnalyzer:
+    def __init__(self):
+        self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
     
     def analyze_answer(self, question, answer, question_type):
         prompt = f"""Analyze this interview answer and provide scoring with feedback. Return JSON format:
