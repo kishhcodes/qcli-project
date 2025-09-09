@@ -92,10 +92,6 @@ Return only valid JSON, no other text:"""
 class QuestionGenerator:
     def __init__(self):
         self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
-
-class ATSAnalyzer:
-    def __init__(self):
-        self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
     
     def generate_interview_questions(self, resume_data):
         prompt = f"""Based on this resume data, generate 10 relevant interview questions in JSON format.
@@ -137,6 +133,14 @@ Return only valid JSON:"""
             pass
         
         return {"questions": [{"type": "general", "question": "Tell me about yourself."}]}
+
+class ATSAnalyzer:
+    def __init__(self):
+        self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+
+class AnswerAnalyzer:
+    def __init__(self):
+        self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
     
     def analyze_ats_score(self, resume_data):
         prompt = f"""Analyze this resume for ATS compatibility and suggest specific job roles. Return JSON format:
@@ -187,10 +191,58 @@ Return only valid JSON:"""
             "keyword_density": 60,
             "format_score": 80
         }
+    
+    def analyze_answer(self, question, answer, question_type):
+        prompt = f"""Analyze this interview answer and provide scoring with feedback. Return JSON format:
+
+Question: {question}
+Question Type: {question_type}
+Answer: {answer}
+
+Return JSON with this structure:
+{{
+  "score": 85,
+  "feedback": "Good answer with specific examples...",
+  "strengths": ["Clear communication", "Relevant experience"],
+  "improvements": ["Add more technical details", "Include metrics"],
+  "overall_rating": "Good"
+}}
+
+Return only valid JSON:"""
+        
+        try:
+            response = self.bedrock.invoke_model(
+                modelId='anthropic.claude-3-haiku-20240307-v1:0',
+                body=json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": 1500,
+                    "messages": [{"role": "user", "content": prompt}]
+                })
+            )
+            
+            result = json.loads(response['body'].read())
+            content = result['content'][0]['text']
+            
+            start = content.find('{')
+            end = content.rfind('}') + 1
+            if start != -1 and end != 0:
+                return json.loads(content[start:end])
+            
+        except (ClientError, json.JSONDecodeError, KeyError):
+            pass
+        
+        return {
+            "score": 70,
+            "feedback": "Please provide more details in your answer.",
+            "strengths": ["Answer provided"],
+            "improvements": ["Add specific examples"],
+            "overall_rating": "Average"
+        }
 
 parser = ResumeParser()
 question_generator = QuestionGenerator()
 ats_analyzer = ATSAnalyzer()
+answer_analyzer = AnswerAnalyzer()
 
 @app.route('/')
 def index():
@@ -217,6 +269,19 @@ def analyze_ats():
             return jsonify({"error": "No JSON data provided"}), 400
         
         analysis = ats_analyzer.analyze_ats_score(data)
+        return jsonify(analysis)
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/analyze-answer', methods=['POST'])
+def analyze_answer():
+    try:
+        data = request.get_json()
+        if not data or not all(k in data for k in ['question', 'answer', 'type']):
+            return jsonify({"error": "Missing required fields: question, answer, type"}), 400
+        
+        analysis = answer_analyzer.analyze_answer(data['question'], data['answer'], data['type'])
         return jsonify(analysis)
     
     except Exception as e:

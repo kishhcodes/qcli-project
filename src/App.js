@@ -6,6 +6,8 @@ function App() {
   const [resumeData, setResumeData] = useState(null);
   const [questions, setQuestions] = useState(null);
   const [atsAnalysis, setAtsAnalysis] = useState(null);
+  const [answers, setAnswers] = useState({});
+  const [answerAnalysis, setAnswerAnalysis] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -69,6 +71,36 @@ function App() {
       setAtsAnalysis(response.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to analyze ATS');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAnswerChange = (questionIndex, answer) => {
+    setAnswers(prev => ({ ...prev, [questionIndex]: answer }));
+  };
+
+  const analyzeAnswer = async (questionIndex, question, questionType) => {
+    const answer = answers[questionIndex];
+    if (!answer?.trim()) {
+      setError('Please provide an answer first');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await axios.post('/analyze-answer', {
+        question: question,
+        answer: answer,
+        type: questionType
+      }, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      setAnswerAnalysis(prev => ({ ...prev, [questionIndex]: response.data }));
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to analyze answer');
     } finally {
       setLoading(false);
     }
@@ -286,11 +318,11 @@ function App() {
         {/* Questions */}
         {questions && (
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4">Interview Questions</h2>
-            <div className="space-y-4">
+            <h2 className="text-xl font-semibold mb-4">Interview Questions & Answers</h2>
+            <div className="space-y-6">
               {questions.questions?.map((q, idx) => (
-                <div key={idx} className="border-l-4 border-blue-500 pl-4">
-                  <div className="flex items-center gap-2 mb-1">
+                <div key={idx} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
                       q.type === 'technical' ? 'bg-red-100 text-red-800' :
                       q.type === 'behavioral' ? 'bg-green-100 text-green-800' :
@@ -299,7 +331,69 @@ function App() {
                       {q.type}
                     </span>
                   </div>
-                  <p className="text-gray-700">{q.question}</p>
+                  <p className="text-gray-700 mb-3 font-medium">{q.question}</p>
+                  
+                  <textarea
+                    value={answers[idx] || ''}
+                    onChange={(e) => handleAnswerChange(idx, e.target.value)}
+                    placeholder="Type your answer here..."
+                    className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    rows={4}
+                  />
+                  
+                  <div className="flex justify-between items-center mt-3">
+                    <button
+                      onClick={() => analyzeAnswer(idx, q.question, q.type)}
+                      disabled={loading || !answers[idx]?.trim()}
+                      className="bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                      {loading ? 'Analyzing...' : 'Analyze Answer'}
+                    </button>
+                  </div>
+
+                  {/* Answer Analysis */}
+                  {answerAnalysis[idx] && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-4 mb-3">
+                        <div className={`text-2xl font-bold ${
+                          answerAnalysis[idx].score >= 80 ? 'text-green-600' :
+                          answerAnalysis[idx].score >= 60 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>
+                          {answerAnalysis[idx].score}%
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          answerAnalysis[idx].overall_rating === 'Excellent' ? 'bg-green-100 text-green-800' :
+                          answerAnalysis[idx].overall_rating === 'Good' ? 'bg-blue-100 text-blue-800' :
+                          answerAnalysis[idx].overall_rating === 'Average' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {answerAnalysis[idx].overall_rating}
+                        </span>
+                      </div>
+                      
+                      <p className="text-gray-700 mb-3">{answerAnalysis[idx].feedback}</p>
+                      
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                          <h4 className="font-semibold text-green-700 mb-2">Strengths</h4>
+                          <ul className="list-disc list-inside space-y-1">
+                            {answerAnalysis[idx].strengths?.map((strength, sIdx) => (
+                              <li key={sIdx} className="text-sm text-gray-600">{strength}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        
+                        <div>
+                          <h4 className="font-semibold text-orange-700 mb-2">Improvements</h4>
+                          <ul className="list-disc list-inside space-y-1">
+                            {answerAnalysis[idx].improvements?.map((improvement, iIdx) => (
+                              <li key={iIdx} className="text-sm text-gray-600">{improvement}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
