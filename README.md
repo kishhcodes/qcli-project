@@ -10,6 +10,18 @@ pip install -r requirements.txt
 python app.py
 ```
 
+### Environment Variables
+Create a `.env` file in the root directory with the following variables:
+```
+SERPAPI_KEY=your_serpapi_api_key  # For job search functionality
+```
+You can get a SERPAPI API key from https://serpapi.com/
+
+Alternatively, you can set these environment variables manually:
+```bash
+export SERPAPI_KEY="your_serpapi_api_key"
+```
+
 ### Frontend (React)
 ```bash
 npm install
