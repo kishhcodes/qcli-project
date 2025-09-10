@@ -3,7 +3,7 @@ import axios from 'axios';
 
 function InterviewSession({ questions, onComplete, onBack }) {
   const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(15);
+  const [timeLeft, setTimeLeft] = useState(60);
   const [answers, setAnswers] = useState({});
   const [sessionStarted, setSessionStarted] = useState(false);
   const [sessionComplete, setSessionComplete] = useState(false);
@@ -25,7 +25,7 @@ function InterviewSession({ questions, onComplete, onBack }) {
 
   const startSession = () => {
     setSessionStarted(true);
-    setTimeLeft(15);
+    setTimeLeft(60);
   };
 
   const handleNextQuestion = () => {
@@ -38,7 +38,7 @@ function InterviewSession({ questions, onComplete, onBack }) {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(prev => prev + 1);
       setCurrentAnswer('');
-      setTimeLeft(15);
+      setTimeLeft(60);
     } else {
       setSessionComplete(true);
     }
@@ -117,8 +117,8 @@ function InterviewSession({ questions, onComplete, onBack }) {
   };
 
   const getTimeColor = () => {
-    if (timeLeft > 10) return 'text-green-600';
-    if (timeLeft > 5) return 'text-yellow-600';
+    if (timeLeft > 30) return 'text-green-600';
+    if (timeLeft > 15) return 'text-yellow-600';
     return 'text-red-600';
   };
 
@@ -186,7 +186,7 @@ function InterviewSession({ questions, onComplete, onBack }) {
             </div>
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Timed Interview Session</h2>
             <p className="text-gray-600 mb-6">
-              Get ready for {questions.length} questions. Each question has 15 seconds to answer.
+              Get ready for {questions.length} questions. Each question has 1 minute to answer.
               You can use text or speech input.
             </p>
             
@@ -197,11 +197,11 @@ function InterviewSession({ questions, onComplete, onBack }) {
                   <div className="text-sm text-gray-600">Questions</div>
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-purple-600">15s</div>
+                  <div className="text-2xl font-bold text-purple-600">1m</div>
                   <div className="text-sm text-gray-600">Per Question</div>
                 </div>
                 <div>
-                  <div className="text-2xl font-bold text-green-600">{questions.length * 15}s</div>
+                  <div className="text-2xl font-bold text-green-600">{questions.length}m</div>
                   <div className="text-sm text-gray-600">Total Time</div>
                 </div>
               </div>

@@ -28,18 +28,35 @@ class ResumeParser:
         return "\n".join([paragraph.text for paragraph in doc.paragraphs])
     
     def parse_with_llm(self, text):
-        prompt = f"""Parse this resume text and extract information into JSON format with these exact fields:
-- name: full name
-- email: email address
-- phone: phone number
-- experience: array of work experience entries
-- education: array of education entries
-- skills: array of skills
+        prompt = f"""Extract structured data from this resume text. Return ONLY valid JSON with these exact fields:
+
+{{
+  "name": "Full Name",
+  "email": "email@example.com",
+  "phone": "+1-234-567-8900",
+  "experience": [
+    {{
+      "company": "Company Name",
+      "position": "Job Title",
+      "duration": "Start - End dates",
+      "description": "Key responsibilities and achievements"
+    }}
+  ],
+  "education": [
+    {{
+      "institution": "University/School Name",
+      "degree": "Degree Type and Major",
+      "year": "Graduation Year",
+      "gpa": "GPA if mentioned"
+    }}
+  ],
+  "skills": ["skill1", "skill2", "skill3"]
+}}
 
 Resume text:
 {text}
 
-Return only valid JSON, no other text:"""
+Return ONLY the JSON object:"""
         
         try:
             response = self.bedrock.invoke_model(
@@ -67,14 +84,48 @@ Return only valid JSON, no other text:"""
         return self.basic_parse(text)
     
     def basic_parse(self, text):
+        import re
         lines = [line.strip() for line in text.split('\n') if line.strip()]
+        
+        # Extract email
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        email_match = re.search(email_pattern, text)
+        email = email_match.group() if email_match else None
+        
+        # Extract phone
+        phone_pattern = r'(\+?1?[-\s]?)?\(?([0-9]{3})\)?[-\s]?([0-9]{3})[-\s]?([0-9]{4})'
+        phone_match = re.search(phone_pattern, text)
+        phone = phone_match.group() if phone_match else None
+        
+        # Extract name (first non-empty line that's not email/phone)
+        name = "Not found"
+        for line in lines[:5]:  # Check first 5 lines
+            if line and not re.search(email_pattern, line) and not re.search(phone_pattern, line):
+                if len(line.split()) >= 2 and len(line) < 50:  # Likely a name
+                    name = line
+                    break
+        
+        # Extract skills (look for skills section)
+        skills = []
+        skills_section = False
+        for line in lines:
+            if re.search(r'\b(skills?|technologies?|tools?)\b', line.lower()):
+                skills_section = True
+                continue
+            if skills_section and line:
+                if re.search(r'\b(experience|education|work|employment)\b', line.lower()):
+                    break
+                # Split by common delimiters
+                line_skills = re.split(r'[,;|•·]', line)
+                skills.extend([s.strip() for s in line_skills if s.strip() and len(s.strip()) > 1])
+        
         return {
-            "name": lines[0] if lines else "Not found",
-            "email": None,
-            "phone": None,
+            "name": name,
+            "email": email,
+            "phone": phone,
             "experience": [],
             "education": [],
-            "skills": []
+            "skills": skills[:10]  # Limit to 10 skills
         }
     
     def parse_resume(self, file_path, file_type):
