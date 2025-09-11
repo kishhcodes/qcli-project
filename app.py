@@ -7,6 +7,11 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 import requests
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -141,9 +146,61 @@ Return ONLY the JSON object:"""
         
         return parsed_data
 
+class SessionContextManager:
+    def __init__(self):
+        self.profiles_file = 'user_profiles.json'
+        self.load_profiles()
+    
+    def load_profiles(self):
+        try:
+            with open(self.profiles_file, 'r') as f:
+                self.profiles = json.load(f)
+        except FileNotFoundError:
+            self.profiles = {}
+    
+    def get_user_context(self, user_email):
+        """Get user's learning context and history"""
+        if user_email not in self.profiles:
+            return None
+        
+        profile = self.profiles[user_email]
+        sessions = profile.get('sessions', [])
+        
+        if not sessions:
+            return None
+        
+        # Analyze recent sessions for context
+        recent_sessions = sessions[-3:]  # Last 3 sessions
+        weak_areas = []
+        improvement_trend = 'stable'
+        
+        # Extract weak areas from recent analysis
+        for session in recent_sessions:
+            analysis = session.get('analysis', {})
+            for q_analysis in analysis.values():
+                if q_analysis.get('score', 0) < 60:
+                    weak_areas.extend(q_analysis.get('improvements', []))
+        
+        # Calculate improvement trend
+        if len(recent_sessions) >= 2:
+            recent_avg = sum(s.get('avg_score', 0) for s in recent_sessions[-2:]) / 2
+            older_avg = sum(s.get('avg_score', 0) for s in recent_sessions[:-2]) / max(1, len(recent_sessions) - 2)
+            if recent_avg > older_avg + 5:
+                improvement_trend = 'improving'
+            elif recent_avg < older_avg - 5:
+                improvement_trend = 'declining'
+        
+        return {
+            'weak_areas': list(set(weak_areas))[:5],  # Top 5 unique weak areas
+            'improvement_trend': improvement_trend,
+            'session_count': len(sessions),
+            'avg_score': profile.get('performance_metrics', {}).get('avg_score', 0)
+        }
+
 class QuestionGenerator:
     def __init__(self):
         self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+        self.context_manager = SessionContextManager()
     
     def generate_interview_questions(self, resume_data):
         prompt = f"""Based on this resume data, generate 10 relevant interview questions in JSON format.
@@ -243,9 +300,46 @@ Return only valid JSON:"""
 class AnswerAnalyzer:
     def __init__(self):
         self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+        self.context_manager = SessionContextManager()
     
-    def analyze_answer(self, question, answer, question_type):
-        prompt = f"""Analyze this interview answer and provide scoring with feedback. Return JSON format:
+    def analyze_answer(self, question, answer, question_type, user_email=None):
+        # Get user context for personalized analysis
+        user_context = None
+        if user_email:
+            user_context = self.context_manager.get_user_context(user_email)
+        
+        if user_context:
+            prompt = f"""Analyze this interview answer considering the user's learning journey:
+
+Question: {question}
+Question Type: {question_type}
+Answer: {answer}
+
+User Learning Context:
+- Previous weak areas: {user_context.get('weak_areas', [])}
+- Improvement trend: {user_context.get('improvement_trend', 'stable')}
+- Average score: {user_context.get('avg_score', 0)}%
+- Session count: {user_context.get('session_count', 0)}
+
+Provide personalized feedback that:
+1. Acknowledges their progress if improving
+2. Addresses recurring weak areas specifically
+3. Adjusts expectations based on their skill level
+4. Provides targeted next steps for improvement
+
+Return JSON with this structure:
+{{
+  "score": 85,
+  "feedback": "Personalized feedback based on learning journey...",
+  "strengths": ["Clear communication", "Relevant experience"],
+  "improvements": ["Targeted suggestions based on history"],
+  "overall_rating": "Good",
+  "progress_note": "Improvement/decline note based on trend"
+}}
+
+Return only valid JSON:"""
+        else:
+            prompt = f"""Analyze this interview answer and provide scoring with feedback. Return JSON format:
 
 Question: {question}
 Question Type: {question_type}
@@ -408,7 +502,7 @@ class JobSearcher:
                 job_criteria.update(profile_criteria)
         
         if not self.serpapi_key:
-            return self._get_comprehensive_fallback_jobs(job_criteria)
+            return {"error": "SERPAPI_KEY not configured. Please add your SERPAPI key to .env file."}
         
         try:
             # Build search query using resume skills and role
@@ -458,8 +552,7 @@ class JobSearcher:
             
         except Exception as e:
             print(f"SERPAPI failed: {e}")
-        
-        return self._get_comprehensive_fallback_jobs(job_criteria)
+            return {"error": f"Job search failed: {str(e)}. Please check your SERPAPI configuration."}
     
     def _calculate_comprehensive_match_score(self, job, criteria):
         job_title = job.get("title", "").lower()
@@ -525,94 +618,7 @@ class JobSearcher:
         
         return min(max(total_score, 0), 100)
     
-    def _get_comprehensive_fallback_jobs(self, criteria):
-        return self._get_fallback_jobs(criteria)
-    
-    def _get_fallback_jobs(self, criteria):
-        """Fallback jobs when SERPAPI fails or is not configured"""
-        interview_score = criteria.get('interview_score', 0)
-        years_exp = criteria.get('years_experience', 0)
-        user_skills = criteria.get('skills', [])
-        tech_stack = criteria.get('tech_stack', [])
-        best_role = criteria.get('best_role', 'Software Engineer')
-        
-        # Different job pools based on interview performance
-        if interview_score >= 80:
-            # High performers get premium opportunities
-            job_data = {
-                "Software Engineer": [
-                    {"company": "Google", "location": "Mountain View, CA", "salary": "$180k-250k", "level": "Senior"},
-                    {"company": "Meta", "location": "Menlo Park, CA", "salary": "$190k-270k", "level": "Staff"},
-                    {"company": "Apple", "location": "Cupertino, CA", "salary": "$175k-240k", "level": "Principal"},
-                    {"company": "Netflix", "location": "Los Gatos, CA", "salary": "$200k-280k", "level": "Senior"},
-                    {"company": "Stripe", "location": "San Francisco, CA", "salary": "$185k-260k", "level": "Lead"}
-                ]
-            }
-        elif interview_score >= 60:
-            # Average performers get standard opportunities
-            job_data = {
-                "Software Engineer": [
-                    {"company": "Microsoft", "location": "Seattle, WA", "salary": "$130k-180k", "level": ""},
-                    {"company": "Amazon", "location": "Remote", "salary": "$120k-170k", "level": ""},
-                    {"company": "Salesforce", "location": "San Francisco, CA", "salary": "$125k-175k", "level": ""},
-                    {"company": "Adobe", "location": "San Jose, CA", "salary": "$115k-165k", "level": ""},
-                    {"company": "Uber", "location": "San Francisco, CA", "salary": "$110k-160k", "level": ""}
-                ]
-            }
-        elif interview_score >= 40:
-            # Below average get mid-tier opportunities
-            job_data = {
-                "Software Engineer": [
-                    {"company": "Startup Inc", "location": "Austin, TX", "salary": "$85k-120k", "level": ""},
-                    {"company": "TechCorp", "location": "Denver, CO", "salary": "$80k-115k", "level": ""},
-                    {"company": "DevCompany", "location": "Remote", "salary": "$75k-110k", "level": ""},
-                    {"company": "CodeWorks", "location": "Portland, OR", "salary": "$70k-105k", "level": ""},
-                    {"company": "WebSolutions", "location": "Phoenix, AZ", "salary": "$65k-100k", "level": ""}
-                ]
-            }
-        else:
-            # Low performers get entry-level/training opportunities
-            job_data = {
-                "Software Engineer": [
-                    {"company": "CodeBootcamp Co", "location": "Remote", "salary": "$45k-65k", "level": "Junior"},
-                    {"company": "Learning Tech", "location": "Online", "salary": "$40k-60k", "level": "Entry Level"},
-                    {"company": "TrainingSoft", "location": "Remote", "salary": "$35k-55k", "level": "Intern"},
-                    {"company": "SkillBuilder Inc", "location": "Various", "salary": "$50k-70k", "level": "Associate"},
-                    {"company": "DevAcademy", "location": "Remote", "salary": "$42k-62k", "level": "Trainee"}
-                ]
-            }
-        
-        # Use best role from ATS analysis or fallback
-        role_key = best_role if best_role in job_data else "Software Engineer"
-        templates = job_data.get(role_key, job_data["Software Engineer"])
-        
-        jobs = []
-        for template in templates:
-            level = template["level"]
-            title = f"{level} {best_role}".strip()
-            
-            # Calculate comprehensive match score
-            job_desc = f"Join {template['company']} as {title}. Skills: {', '.join(tech_stack[:3])}. Experience: {years_exp}+ years."
-            match_score = self._calculate_comprehensive_match_score({
-                "title": title,
-                "description": job_desc
-            }, criteria)
-            
-            jobs.append({
-                "title": title,
-                "company": template["company"],
-                "location": template["location"],
-                "description": f"Join {template['company']} as {title}. {template['salary']} salary range. Skills: {', '.join(user_skills[:3])}. {'Premium benefits and equity options.' if interview_score >= 80 else 'Full benefits and growth opportunities.' if interview_score >= 60 else 'Training and mentorship provided.' if interview_score < 40 else 'Competitive benefits package.'}",
-                "apply_link": f"https://www.linkedin.com/jobs/search/?keywords={best_role.replace(' ', '%20')}&location={template['location'].replace(' ', '%20')}",
-                "source": "Curated Listings",
-                "match_score": match_score,
-                "personalized": bool(criteria)
-            })
-        
-        # Sort by match score
-        jobs.sort(key=lambda x: x['match_score'], reverse=True)
-        
-        return {"jobs": jobs, "personalized": True}
+
     
     def _calculate_experience_years(self, experience):
         """Extract years of experience from resume"""
@@ -679,13 +685,17 @@ class JobSearcher:
 parser = ResumeParser()
 question_generator = QuestionGenerator()
 ats_analyzer = ATSAnalyzer()
-answer_analyzer = AnswerAnalyzer()
+# Moved to end of file
 job_searcher = JobSearcher()
 user_profile = UserProfile()
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return app.send_static_file('index.html')
+
+@app.route('/<path:path>')
+def static_files(path):
+    return app.send_static_file(path)
 
 @app.route('/generate-questions', methods=['POST'])
 def generate_questions():
@@ -720,7 +730,8 @@ def analyze_answer():
         if not data or not all(k in data for k in ['question', 'answer', 'type']):
             return jsonify({"error": "Missing required fields: question, answer, type"}), 400
         
-        analysis = answer_analyzer.analyze_answer(data['question'], data['answer'], data['type'])
+        user_email = data.get('user_email')
+        analysis = answer_analyzer.analyze_answer(data['question'], data['answer'], data['type'], user_email)
         return jsonify(analysis)
     
     except Exception as e:
@@ -804,6 +815,14 @@ def parse_resume():
     
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# Initialize components
+resume_parser = ResumeParser()
+question_generator = QuestionGenerator()
+ats_analyzer = ATSAnalyzer()
+answer_analyzer = AnswerAnalyzer()
+job_searcher = JobSearcher()
+user_profile = UserProfile()
 
 if __name__ == '__main__':
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'

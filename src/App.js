@@ -104,45 +104,68 @@ function App() {
         onComplete={async (answers, scores, completionRate) => {
           setSessionAnswers(answers);
           setShowSession(false);
+          setLoading(true);
+          setError('');
           
-          // Analyze all session answers
-          const analysis = {};
-          let totalScore = 0;
-          let answeredCount = 0;
-          
-          for (const [questionIndex, answer] of Object.entries(answers)) {
-            const question = questions?.questions?.[parseInt(questionIndex)];
-            if (question && answer.trim()) {
-              try {
-                const response = await axios.post('/analyze-answer', {
-                  question: question.question,
-                  answer: answer,
-                  type: question.type
-                }, {
-                  headers: { 'Content-Type': 'application/json' }
-                });
-                analysis[questionIndex] = response.data;
-                totalScore += response.data.score;
-                answeredCount++;
-              } catch (error) {
-                console.error(`Failed to analyze answer ${questionIndex}:`, error);
+          try {
+            // Analyze all session answers
+            const analysis = {};
+            let totalScore = 0;
+            let answeredCount = 0;
+            
+            console.log('Starting analysis for', Object.keys(answers).length, 'answers');
+            
+            for (const [questionIndex, answer] of Object.entries(answers)) {
+              const question = questions?.questions?.[parseInt(questionIndex)];
+              if (question && answer.trim()) {
+                try {
+                  console.log(`Analyzing answer ${questionIndex}:`, answer.substring(0, 50) + '...');
+                  const response = await axios.post('/analyze-answer', {
+                    question: question.question,
+                    answer: answer,
+                    type: question.type,
+                    user_email: user
+                  }, {
+                    headers: { 'Content-Type': 'application/json' }
+                  });
+                  
+                  if (response.data && response.data.score !== undefined) {
+                    analysis[questionIndex] = response.data;
+                    totalScore += response.data.score;
+                    answeredCount++;
+                    console.log(`Answer ${questionIndex} analyzed. Score:`, response.data.score);
+                  } else {
+                    console.error(`Invalid response for answer ${questionIndex}:`, response.data);
+                  }
+                } catch (error) {
+                  console.error(`Failed to analyze answer ${questionIndex}:`, error);
+                  setError(`Failed to analyze answer ${parseInt(questionIndex) + 1}: ${error.message}`);
+                }
               }
             }
+            
+            console.log('Analysis complete. Total answers analyzed:', answeredCount);
+            setSessionAnalysis(analysis);
+            
+            const avgScore = answeredCount > 0 ? Math.round(totalScore / answeredCount) : 0;
+            console.log('Average score calculated:', avgScore);
+            
+            recordSession({
+              answers,
+              scores,
+              analysis,
+              avg_score: avgScore,
+              completion_rate: completionRate
+            });
+            
+            // Refresh user history
+            fetchUserHistory(user);
+          } catch (error) {
+            console.error('Session analysis failed:', error);
+            setError('Failed to analyze session: ' + error.message);
+          } finally {
+            setLoading(false);
           }
-          setSessionAnalysis(analysis);
-          
-          const avgScore = answeredCount > 0 ? Math.round(totalScore / answeredCount) : 0;
-          
-          recordSession({
-            answers,
-            scores,
-            analysis,
-            avg_score: avgScore,
-            completion_rate: completionRate
-          });
-          
-          // Refresh user history
-          fetchUserHistory(user);
         }}
         onBack={() => setShowSession(false)}
       />
@@ -185,7 +208,10 @@ function App() {
     setError('');
 
     try {
-      const response = await axios.post('/generate-questions', resumeData, {
+      const response = await axios.post('/generate-questions', {
+        resume_data: resumeData,
+        user_email: user
+      }, {
         headers: { 'Content-Type': 'application/json' }
       });
       setQuestions(response.data);
@@ -232,7 +258,8 @@ function App() {
       const response = await axios.post('/analyze-answer', {
         question: question,
         answer: answer,
-        type: questionType
+        type: questionType,
+        user_email: user
       }, {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -795,21 +822,30 @@ function App() {
                   <div className="text-sm text-gray-600">Completion Rate</div>
                 </div>
                 <div>
-                  <div className={`text-2xl font-bold ${
-                    Object.keys(sessionAnalysis).length > 0 ?
-                    (Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length >= 80 ? 'text-green-600' :
-                     Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length >= 60 ? 'text-yellow-600' :
-                     Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length >= 50 ? 'text-orange-600' : 'text-red-600') :
-                    'text-gray-400'
-                  }`}>
-                    {Object.keys(sessionAnalysis).length > 0 ? 
-                      Math.round(Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length) : 0}%
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Average Score {Object.keys(sessionAnalysis).length > 0 && Math.round(Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length) < 50 && (
-                      <span className="text-red-600 font-semibold">(Not Eligible)</span>
-                    )}
-                  </div>
+                  {loading && Object.keys(sessionAnalysis).length === 0 ? (
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                      <div className="text-sm text-gray-600">Analyzing...</div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className={`text-2xl font-bold ${
+                        Object.keys(sessionAnalysis).length > 0 ?
+                        (Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length >= 80 ? 'text-green-600' :
+                         Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length >= 60 ? 'text-yellow-600' :
+                         Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length >= 50 ? 'text-orange-600' : 'text-red-600') :
+                        'text-gray-400'
+                      }`}>
+                        {Object.keys(sessionAnalysis).length > 0 ? 
+                          Math.round(Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length) : 0}%
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        Average Score {Object.keys(sessionAnalysis).length > 0 && Math.round(Object.values(sessionAnalysis).reduce((sum, a) => sum + a.score, 0) / Object.keys(sessionAnalysis).length) < 50 && (
+                          <span className="text-red-600 font-semibold">(Not Eligible)</span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -833,7 +869,12 @@ function App() {
                       <p className="text-sm text-gray-700">{answer}</p>
                     </div>
                     
-                    {sessionAnalysis[questionIndex] && (
+                    {loading && !sessionAnalysis[questionIndex] ? (
+                      <div className="mt-3 p-4 bg-gray-50 rounded-lg text-center">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                        <p className="text-sm text-gray-600">Analyzing answer...</p>
+                      </div>
+                    ) : sessionAnalysis[questionIndex] ? (
                       <div className="mt-3 p-4 bg-blue-50 rounded-lg">
                         <div className="flex items-center gap-4 mb-3">
                           <div className={`text-xl font-bold ${
@@ -850,6 +891,11 @@ function App() {
                           }`}>
                             {sessionAnalysis[questionIndex].overall_rating}
                           </span>
+                          {sessionAnalysis[questionIndex].progress_note && (
+                            <span className="text-xs text-purple-600 bg-purple-100 px-2 py-1 rounded">
+                              {sessionAnalysis[questionIndex].progress_note}
+                            </span>
+                          )}
                         </div>
                         
                         <p className="text-sm text-gray-700 mb-3">{sessionAnalysis[questionIndex].feedback}</p>
@@ -873,6 +919,10 @@ function App() {
                             </ul>
                           </div>
                         </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 p-4 bg-yellow-50 rounded-lg">
+                        <p className="text-sm text-yellow-700">Analysis not available for this answer</p>
                       </div>
                     )}
                   </div>
